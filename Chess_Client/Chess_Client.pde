@@ -1,13 +1,31 @@
 //Mark Ewert
 //May 14 2020
 
-//Server (plays with black pieces)
+//Client (plays with black pieces)
 import processing.net.*;
 Client myClient;
 
 //pallete
-color lightBrown = #FFFFC3;
-color darkBrown  = #D8864E;
+color red             = #df2020;
+color orange          = #df8020;
+color yellow          = #dfdf20;
+color lime            = #80df20;
+color green           = #50df20;
+color mint            = #20df50;
+color cyan            = #20dfdf;
+color blue            = #2080df;
+color navy            = #2020df;
+color purple          = #8020df;
+color violet          = #df20df;
+color pink            = #df2080;
+color lightPink       = #ff66b3;
+color black           = #000000;
+color darkGrey        = #404040;
+color grey            = #808080;
+color lightGrey       = #bfbfbf;
+color white           = #ffffff;
+color lightBrown      = #FFFFC3;
+color darkBrown       = #D8864E;
 
 //images
 PImage bRook, bBishop, bKnight, bQueen, bKing, bPawn;
@@ -17,22 +35,27 @@ final String wPieces = "rbnqkp";
 
 //grid
 char grid[][] = { //Uppercase means black, lowercase means white
-  {'R', 'B', 'N', 'Q', 'K', 'N', 'B', 'R'}, 
-  {'P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'}, 
-  {' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '}, 
-  {' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '}, 
-  {' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '}, 
-  {' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '}, 
+  {'r', 'n', 'b', 'k', 'q', 'b', 'n', 'r'}, 
   {'p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'}, 
-  {'r', 'b', 'n', 'q', 'k', 'n', 'b', 'r'}
+  {' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '}, 
+  {' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '}, 
+  {' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '}, 
+  {' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '}, 
+  {'P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'}, 
+  {'R', 'N', 'B', 'K', 'Q', 'B', 'N', 'R'}
 };
 
 //game
 int row1, col1, row2, col2;
 boolean firstClick = true;
-String currentTeam = "";
+int turn;
 final int WHITE = 1;
 final int BLACK = 2;
+int lastRowB, lastColB, lastRowW, lastColW;
+char takenPiece;
+boolean canUndo, recentPawnChangeB, recentPawnChangeW, pawnChangingB, pawnChangingW;
+int pawnChangeCol;
+boolean win, lose;
 //------------------------------------------------------------------
 void setup() {
   //Server
@@ -41,7 +64,7 @@ void setup() {
   //Basic
   size(600, 600);
   textAlign(CENTER, CENTER);
-  textSize(12);
+  textSize(36);
 
   //Loads black pieces pics
   bRook = loadImage("blackRook.png");
@@ -66,15 +89,30 @@ void setup() {
     }
     println();
   }
+
+  //game
+  turn = WHITE;
+  lastRowW = -10;
+  lastRowB = -10;
+  pawnChangingB = false;
+  canUndo = false;
+  win = false;
 }//------------------------------------------------------------------
 
 void draw() {
-  drawBoard();
-  drawPieces();
+  //during game
+  if (!win && !lose) {
+    //board
+    drawBoard();
+    drawPieces();
+    highlight();
 
-  receiveMove();
-
-  highlight();
+    //recieve move only when nobody is changing pawns
+    if (!pawnChangingB) {
+      receiveMove();
+      pieceConditions();
+    }
+  } else gameEnd();
 }//------------------------------------------------------------------
 
 void drawBoard() {
@@ -96,12 +134,16 @@ void drawPieces() {
       translate(col*75, row*75);
 
       char piece = grid[row][col];
+      if (turn == WHITE) tint(white, 200);
+      //black pieces
       if (piece == 'R') image(bRook, 0, 0, 75, 75);
       if (piece == 'B') image(bBishop, 0, 0, 75, 75);
       if (piece == 'N') image(bKnight, 0, 0, 75, 75);
       if (piece == 'Q') image(bQueen, 0, 0, 75, 75);
       if (piece == 'K') image(bKing, 0, 0, 75, 75);
       if (piece == 'P') image(bPawn, 0, 0, 75, 75);
+      //white pieces
+      tint(white, 255);
       if (piece == 'r') image(wRook, 0, 0, 75, 75);
       if (piece == 'b') image(wBishop, 0, 0, 75, 75);
       if (piece == 'n') image(wKnight, 0, 0, 75, 75);
@@ -114,58 +156,188 @@ void drawPieces() {
   }
 }//------------------------------------------------------------------
 
-void receiveMove() {
-  //client
-  if (myClient.available() > 0) {
-    String incoming = myClient.readString();
-    int r1 = int(incoming.substring(0, 1));
-    int c1 = int(incoming.substring(2, 3));
-    int r2 = int(incoming.substring(4, 5));
-    int c2 = int(incoming.substring(6, 7));
-    //moves piece to new spot
-      grid[r2][c2] = grid[r1][c1];  
-      grid[r1][c1] = ' ';
-    
-  }
-}//------------------------------------------------------------------
-
 void highlight() {
+  //highlights other teams last move
+  if (turn == BLACK) {
+    noFill();
+    stroke(red, 200);
+    strokeWeight(5);
+    rect(lastColW*75, lastRowW*75, 75, 75, 2);
+    //highlight your last move
+  } else if (turn == WHITE) {
+    noFill();
+    stroke(blue, 200);
+    strokeWeight(5);
+    rect(lastColB*75, lastRowB*75, 75, 75, 2);
+  }
+
+  //highlight's my teams selection
   if (grid[row1][col1] != ' ' && !firstClick) {
     noFill();
-    stroke(#FF0000);
+    stroke(green, 200);
     strokeWeight(5);
     rect(col1*75, row1*75, 75, 75, 2);
   }
+
+  //white pawn change prompt
+  textSize(36);
+  if (pawnChangingB) {
+    fill(black, 200);
+    noStroke();
+    rect(0, 75, width, height-150);
+    fill(white);
+    text("'R' for rook   'N' for knight", width/2, height*1/3);
+    text("'B' for bishop   'Q' for queen", width/2, height*2/3);
+    //black pawn change prompt
+  } else if (pawnChangingW) {
+    fill(white, 200);
+    noStroke();
+    rect(0, 75, width, height-150);
+    fill(black);
+    text("please wait fot the other", width/2, height*7/16);
+    text("player to select their piece", width/2, height*9/16);
+  }
 }//------------------------------------------------------------------
 
-void mousePressed() {
-  if (firstClick) {
-    col1 = mouseX/75;
-    row1 = mouseY/75;
-    //if clicking on a piece
-    if (grid[row1][col1] != ' ') {
-      //if clicking on a black piece
-      if (bPieces.contains("" + grid[row1][col1])) currentTeam = bPieces;
-      //if clicking on a white piece
-      else if (wPieces.contains("" + grid[row1][col1])) currentTeam = wPieces;
-      firstClick = false;
+void receiveMove() {
+  //Client
+  if (myClient.available() > 0) {
+    String incoming = myClient.readString();
+    println(incoming);
+    int r1 = 7-int(incoming.substring(0, 1));
+    int c1 = 7-int(incoming.substring(2, 3));
+    int r2 = 7-int(incoming.substring(4, 5));
+    int c2 = 7-int(incoming.substring(6, 7));
+
+    //undo
+    if (incoming.endsWith("takenPiece")) {
+      char capturedPiece = incoming.charAt(8);
+      if (recentPawnChangeW) grid[r2][c2] = 'p';
+      else grid[r2][c2] = grid[r1][c1];
+      grid[r1][c1] = capturedPiece;    
+      canUndo = false;
+      recentPawnChangeW = false;
+      turn = WHITE;
+    } 
+
+    //puts wait message on screen
+    if (incoming.endsWith("pawnChanging") && !lose)  pawnChangingW = true;
+
+    //receive chosen pawn promotion
+    if (incoming.endsWith("pawnPromoted")) {
+      char promotedPawn = incoming.charAt(8);
+      println(promotedPawn);
+      grid[r1][c1] = promotedPawn;
+      pawnChangingW = false;
+      recentPawnChangeW = true;
+      turn = BLACK;
+    } 
+
+    //moves piece to new spot
+    if (incoming.endsWith("move")) {
+      grid[r2][c2] = grid[r1][c1];  
+      grid[r1][c1] = ' ';
+      lastRowW = r2;
+      lastColW = c2;
+      turn = BLACK;
     }
-  } else {
-    col2 = mouseX/75;
-    row2 = mouseY/75;
-    //if clicking on the same team's piece, take turn again
-    if (currentTeam.contains("" + grid[row2][col2])) {
-      row1 = 0;
-      col1 = 0;
-    } else {
-      //else, take other team's piece or empty tile
-      grid[row2][col2] = grid[row1][col1];
-      grid[row1][col1] = ' ';
-      myClient.write(row1 + "," + col1 + "," + row2 + "," + col2);
+  }
+}//------------------------------------------------------------------
+
+void pieceConditions() {
+  int winCount = 0;
+  int loseCount = 0;
+
+  for (int row = 0; row < 8; row++) {
+    for (int col = 0; col < 8; col++) {
+
+      //checks to see if there is still a king on each team
+      if (grid[row][col] == 'K') winCount++;
+      if (grid[row][col] == 'k') loseCount++;
+
+      //pawn change
+      if (row == 0 && grid[row][col] == 'P') {
+        //pawnChangeRow would be 0
+        pawnChangeCol = col;
+        pawnChangingB = true;
+        myClient.write(0 + "," + pawnChangeCol + "," + 0 + "," + 0 + "," + "pawnChanging");
+      }
     }
-    firstClick = true;
   }
 
-  //Print info about the click
-  println("first(" + row1 + ", " + col1 + ", " + grid[row1][col1] + "), second(" + row2 + ", " + col2 + ", " + grid[row2][col2] + "), FClick = " + firstClick);
+  //Determines winner
+  if (winCount == 0) lose = true;
+  if (loseCount == 0) win = true;
+}//-------------------------------------------------------------------
+
+void gameEnd() {
+  textSize(96);
+  if (win) {
+    background(black);
+    fill(blue);
+    text("You Win!", width/2, height/2);
+  } else if (lose) {
+    background(grey);
+    fill(red);
+    text("You Lose...", width/2, height/2);
+  }
+}//-------------------------------------------------------------------
+
+void mousePressed() {
+  if (turn == BLACK) {
+    if (firstClick) {
+      col1 = mouseX/75;
+      row1 = mouseY/75;
+      //if clicking on a black piece
+      if (bPieces.contains("" + grid[row1][col1])) firstClick = false;
+    } else {
+      col2 = mouseX/75;
+      row2 = mouseY/75;
+      //if clicking on the same team's piece, take turn again
+      if (bPieces.contains("" + grid[row2][col2])) {
+        row1 = 0;
+        col1 = 0;
+      } else {
+        //else, take other team's piece or empty tile
+        if (wPieces.contains("" + grid[row2][col2])) takenPiece = grid[row2][col2];
+        else takenPiece = ' ';
+        grid[row2][col2] = grid[row1][col1];
+        grid[row1][col1] = ' ';
+        myClient.write(row1 + "," + col1 + "," + row2 + "," + col2 + "," + "move");
+        lastRowB = row2;
+        lastColB = col2;
+        canUndo = true;
+        if (!(row2 == 0 && grid[row2][col2] == 'P')) turn = WHITE;
+      }
+      firstClick = true;
+    }
+
+    //Print info about the click
+    println("first(" + row1 + ", " + col1 + ", " + grid[row1][col1] + "), second(" + row2 + ", " + col2 + ", " + grid[row2][col2] + ")");
+  }
 }//------------------------------------------------------------------
+
+void keyPressed() {
+  //undo
+  if (key == ' ' && turn == WHITE && canUndo) {
+    if (recentPawnChangeB) grid[row1][col1] = 'P';
+    else grid[row1][col1] = grid[lastRowB][lastColB];
+    grid[lastRowB][lastColB] = takenPiece;
+    turn = BLACK;
+    myClient.write(lastRowB + "," + lastColB + "," + row1 + "," + col1 + "," + takenPiece + "," + "takenPiece");
+    canUndo = false;
+    recentPawnChangeB = false;
+  }
+
+  //pawn change
+  String possibleChoices = "RNBQ";
+  if (pawnChangingB && possibleChoices.contains("" + key)) {
+    char changedPiece = key;
+    //row is 0 because that is where pawns can change
+    grid[0][pawnChangeCol] = changedPiece;
+    myClient.write(0 + "," + pawnChangeCol +  "," + 0 + "," + pawnChangeCol + "," + changedPiece + "," + "pawnPromoted");
+    pawnChangingB = false;
+    recentPawnChangeB = true;
+    turn = WHITE;
+  }
+}//-----------------------------------------------------------------
