@@ -53,8 +53,9 @@ final int WHITE = 1;
 final int BLACK = 2;
 int lastRowB, lastColB, lastRowW, lastColW;
 char takenPiece;
-boolean canUndo, pawnChangeB, pawnChangeW;
+boolean canUndo, recentPawnChangeB, recentPawnChangeW, pawnChangingB, pawnChangingW;
 int pawnChangeCol;
+boolean win, lose;
 //------------------------------------------------------------------
 void setup() {
   //Server
@@ -93,20 +94,25 @@ void setup() {
   turn = WHITE;
   lastRowW = -10;
   lastRowB = -10;
-  pawnChangeB = false;
+  pawnChangingB = false;
   canUndo = false;
+  win = false;
 }//------------------------------------------------------------------
 
 void draw() {
-  //board
-  drawBoard();
-  drawPieces();
-  highlight();
+  //during game
+  if (!win && !lose) {
+    //board
+    drawBoard();
+    drawPieces();
+    highlight();
 
-  //recieve move only when nobody is changing pawns
-  if (!pawnChangeB) receiveMove();
-
-  pieceConditions();
+    //recieve move only when nobody is changing pawns
+    if (!pawnChangingB) {
+      receiveMove();
+      pieceConditions();
+    }
+  } else gameEnd();
 }//------------------------------------------------------------------
 
 void drawBoard() {
@@ -174,7 +180,8 @@ void highlight() {
   }
 
   //white pawn change prompt
-  if (pawnChangeB) {
+  textSize(36);
+  if (pawnChangingB) {
     fill(black, 200);
     noStroke();
     rect(0, 75, width, height-150);
@@ -182,7 +189,7 @@ void highlight() {
     text("'R' for rook   'N' for knight", width/2, height*1/3);
     text("'B' for bishop   'Q' for queen", width/2, height*2/3);
     //black pawn change prompt
-  } else if (pawnChangeW) {
+  } else if (pawnChangingW) {
     fill(white, 200);
     noStroke();
     rect(0, 75, width, height-150);
@@ -202,20 +209,32 @@ void receiveMove() {
     int r2 = 7-int(incoming.substring(4, 5));
     int c2 = 7-int(incoming.substring(6, 7));
 
-    //recovers captured piece
+    //undo
     if (incoming.endsWith("takenPiece")) {
       char capturedPiece = incoming.charAt(8);
-      grid[r2][c2] = grid[r1][c1];
+      if (recentPawnChangeW) grid[r2][c2] = 'p';
+      else grid[r2][c2] = grid[r1][c1];
       grid[r1][c1] = capturedPiece;    
       canUndo = false;
+      recentPawnChangeW = false;
       turn = WHITE;
-      //receive chosen pawn promotion
-    } else if (incoming.endsWith("pawnPromoted")) {
+    } 
+
+    //puts wait message on screen
+    if (incoming.endsWith("pawnChanging") && !lose)  pawnChangingW = true;
+
+    //receive chosen pawn promotion
+    if (incoming.endsWith("pawnPromoted")) {
       char promotedPawn = incoming.charAt(8);
+      println(promotedPawn);
       grid[r1][c1] = promotedPawn;
+      pawnChangingW = false;
+      recentPawnChangeW = true;
       turn = BLACK;
-    } else if (incoming.endsWith("move")) {
-      //moves piece to new spot
+    } 
+
+    //moves piece to new spot
+    if (incoming.endsWith("move")) {
       grid[r2][c2] = grid[r1][c1];  
       grid[r1][c1] = ' ';
       lastRowW = r2;
@@ -226,15 +245,41 @@ void receiveMove() {
 }//------------------------------------------------------------------
 
 void pieceConditions() {
+  int winCount = 0;
+  int loseCount = 0;
+
   for (int row = 0; row < 8; row++) {
     for (int col = 0; col < 8; col++) {
 
+      //checks to see if there is still a king on each team
+      if (grid[row][col] == 'K') winCount++;
+      if (grid[row][col] == 'k') loseCount++;
+
+      //pawn change
       if (row == 0 && grid[row][col] == 'P') {
         //pawnChangeRow would be 0
         pawnChangeCol = col;
-        pawnChangeB = true;
+        pawnChangingB = true;
+        myClient.write(0 + "," + pawnChangeCol + "," + 0 + "," + 0 + "," + "pawnChanging");
       }
     }
+  }
+
+  //Determines winner
+  if (winCount == 0) lose = true;
+  if (loseCount == 0) win = true;
+}//-------------------------------------------------------------------
+
+void gameEnd() {
+  textSize(96);
+  if (win) {
+    background(black);
+    fill(blue);
+    text("You Win!", width/2, height/2);
+  } else if (lose) {
+    background(grey);
+    fill(red);
+    text("You Lose...", width/2, height/2);
   }
 }//-------------------------------------------------------------------
 
@@ -258,7 +303,7 @@ void mousePressed() {
         else takenPiece = ' ';
         grid[row2][col2] = grid[row1][col1];
         grid[row1][col1] = ' ';
-        myClient.write(row1 + "," + col1 + "," + row2 + "," + col2);
+        myClient.write(row1 + "," + col1 + "," + row2 + "," + col2 + "," + "move");
         lastRowB = row2;
         lastColB = col2;
         canUndo = true;
@@ -275,21 +320,24 @@ void mousePressed() {
 void keyPressed() {
   //undo
   if (key == ' ' && turn == WHITE && canUndo) {
-    grid[row1][col1] = grid[lastRowB][lastColB];
+    if (recentPawnChangeB) grid[row1][col1] = 'P';
+    else grid[row1][col1] = grid[lastRowB][lastColB];
     grid[lastRowB][lastColB] = takenPiece;
     turn = BLACK;
     myClient.write(lastRowB + "," + lastColB + "," + row1 + "," + col1 + "," + takenPiece + "," + "takenPiece");
     canUndo = false;
+    recentPawnChangeB = false;
   }
 
   //pawn change
   String possibleChoices = "RNBQ";
-  if (pawnChangeB && possibleChoices.contains("" + key)) {
+  if (pawnChangingB && possibleChoices.contains("" + key)) {
     char changedPiece = key;
     //row is 0 because that is where pawns can change
     grid[0][pawnChangeCol] = changedPiece;
     myClient.write(0 + "," + pawnChangeCol +  "," + 0 + "," + pawnChangeCol + "," + changedPiece + "," + "pawnPromoted");
-    pawnChangeB = false;
+    pawnChangingB = false;
+    recentPawnChangeB = true;
     turn = WHITE;
   }
 }//-----------------------------------------------------------------
