@@ -284,7 +284,7 @@ void gameEnd() {
 }//-------------------------------------------------------------------
 
 void mousePressed() {
-  if (turn == BLACK) {
+  if (turn == BLACK && !pawnChangingB && !pawnChangingW) {
     if (firstClick) {
       col1 = mouseX/75;
       row1 = mouseY/75;
